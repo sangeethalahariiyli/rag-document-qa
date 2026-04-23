@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>RAG Document Q&A</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0a0f; --surface: #12121a; --surface2: #1a1a26;
+      --border: #2a2a3d; --accent: #7c6af7; --accent2: #a78bfa;
+      --accent-glow: rgba(124,106,247,0.15); --text: #e8e8f0;
+      --text-muted: #6b6b8a; --text-dim: #3a3a55;
+      --user-bg: #1e1a3a; --bot-bg: #12121a; --success: #4ade80;
+      --font-display: 'Syne', sans-serif; --font-mono: 'DM Mono', monospace;
+    }
+    body { background: var(--bg); color: var(--text); font-family: var(--font-display); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+    body::before { content: ''; position: fixed; inset: 0; background-image: linear-gradient(rgba(124,106,247,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(124,106,247,0.03) 1px, transparent 1px); background-size: 40px 40px; pointer-events: none; z-index: 0; }
+    header { position: relative; z-index: 10; display: flex; align-items: center; justify-content: space-between; padding: 18px 32px; border-bottom: 1px solid var(--border); background: rgba(10,10,15,0.9); backdrop-filter: blur(12px); }
+    .logo { display: flex; align-items: center; gap: 12px; }
+    .logo-icon { width: 36px; height: 36px; background: linear-gradient(135deg, var(--accent), var(--accent2)); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: 0 0 20px var(--accent-glow); }
+    .logo-text { font-size: 18px; font-weight: 800; letter-spacing: -0.5px; background: linear-gradient(135deg, #fff 40%, var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .status-badge { display: flex; align-items: center; gap: 8px; padding: 6px 14px; background: rgba(74,222,128,0.08); border: 1px solid rgba(74,222,128,0.2); border-radius: 20px; font-family: var(--font-mono); font-size: 12px; color: var(--success); }
+    .status-dot { width: 7px; height: 7px; background: var(--success); border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .main { flex: 1; display: flex; position: relative; z-index: 1; overflow: hidden; }
+    .sidebar { width: 260px; border-right: 1px solid var(--border); padding: 24px 20px; display: flex; flex-direction: column; gap: 24px; background: var(--surface); overflow-y: auto; }
+    .sidebar-section h3, .sample-questions h3 { font-size: 10px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px; }
+    .stat-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 8px; }
+    .stat-label { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+    .stat-value { font-size: 22px; font-weight: 700; color: var(--accent2); }
+    .sample-btn { display: block; width: 100%; text-align: left; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; color: var(--text); font-family: var(--font-display); font-size: 12px; cursor: pointer; margin-bottom: 8px; transition: all 0.2s; line-height: 1.4; }
+    .sample-btn:hover { border-color: var(--accent); background: var(--accent-glow); color: var(--accent2); transform: translateX(3px); }
+    .chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .messages { flex: 1; overflow-y: auto; padding: 32px; display: flex; flex-direction: column; gap: 24px; scroll-behavior: smooth; }
+    .messages::-webkit-scrollbar { width: 4px; }
+    .messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .welcome { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; text-align: center; gap: 16px; animation: fadeIn 0.6s ease; }
+    .welcome-icon { width: 72px; height: 72px; background: linear-gradient(135deg, var(--accent), var(--accent2)); border-radius: 20px; display: flex; align-items: center; justify-content: center; font-size: 32px; box-shadow: 0 0 40px var(--accent-glow); margin-bottom: 8px; }
+    .welcome h2 { font-size: 28px; font-weight: 800; letter-spacing: -1px; background: linear-gradient(135deg, #fff 40%, var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .welcome p { color: var(--text-muted); font-size: 15px; max-width: 400px; line-height: 1.6; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .message { display: flex; gap: 14px; animation: slideIn 0.3s ease; max-width: 800px; }
+    @keyframes slideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .message.user { flex-direction: row-reverse; align-self: flex-end; }
+    .message.bot { align-self: flex-start; }
+    .avatar { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+    .message.user .avatar { background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 0 15px var(--accent-glow); }
+    .message.bot .avatar { background: var(--surface2); border: 1px solid var(--border); }
+    .bubble { max-width: 600px; padding: 14px 18px; border-radius: 14px; line-height: 1.7; font-size: 14px; }
+    .message.user .bubble { background: var(--user-bg); border: 1px solid rgba(124,106,247,0.3); border-top-right-radius: 4px; }
+    .message.bot .bubble { background: var(--bot-bg); border: 1px solid var(--border); border-top-left-radius: 4px; }
+    .sources { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+    .sources-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+    .source-chip { display: inline-flex; align-items: center; gap: 5px; background: rgba(124,106,247,0.08); border: 1px solid rgba(124,106,247,0.2); border-radius: 6px; padding: 4px 10px; font-family: var(--font-mono); font-size: 11px; color: var(--accent2); margin-right: 6px; margin-bottom: 4px; }
+    .typing { display: flex; align-items: center; gap: 5px; padding: 14px 18px; }
+    .typing span { width: 7px; height: 7px; background: var(--accent); border-radius: 50%; animation: bounce 1.2s infinite; }
+    .typing span:nth-child(2) { animation-delay: 0.2s; }
+    .typing span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
+    .input-area { padding: 20px 32px 28px; border-top: 1px solid var(--border); background: rgba(10,10,15,0.9); backdrop-filter: blur(12px); }
+    .input-wrapper { display: flex; gap: 12px; align-items: flex-end; background: var(--surface2); border: 1px solid var(--border); border-radius: 14px; padding: 12px 16px; transition: border-color 0.2s; }
+    .input-wrapper:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+    textarea { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-family: var(--font-display); font-size: 14px; resize: none; max-height: 120px; min-height: 24px; line-height: 1.6; }
+    textarea::placeholder { color: var(--text-muted); }
+    .send-btn { width: 38px; height: 38px; background: linear-gradient(135deg, var(--accent), var(--accent2)); border: none; border-radius: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.2s; box-shadow: 0 0 15px var(--accent-glow); }
+    .send-btn:hover { transform: scale(1.05); }
+    .send-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+    .send-btn svg { width: 16px; height: 16px; fill: white; }
+    .input-hint { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); margin-top: 8px; padding-left: 4px; }
+    .error-bubble { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2); color: #fca5a5; padding: 12px 16px; border-radius: 10px; font-size: 13px; }
+  </style>
+</head>
+<body>
+<header>
+  <div class="logo">
+    <div class="logo-icon">📚</div>
+    <span class="logo-text">RAG Document Q&A</span>
+  </div>
+  <div class="status-badge">
+    <div class="status-dot"></div>
+    API Connected
+  </div>
+</header>
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <h3>Stats</h3>
+      <div class="stat-card">
+        <div class="stat-label">Questions Asked</div>
+        <div class="stat-value" id="questionCount">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Model</div>
+        <div class="stat-value" style="font-size:14px;padding-top:4px;">Gemini 2.5</div>
+      </div>
+    </div>
+    <div class="sample-questions">
+      <h3>Try asking</h3>
+      <button class="sample-btn" onclick="askSample('What is machine learning?')">What is machine learning?</button>
+      <button class="sample-btn" onclick="askSample('What are neural networks?')">What are neural networks?</button>
+      <button class="sample-btn" onclick="askSample('What is the difference between supervised and unsupervised learning?')">Supervised vs unsupervised?</button>
+      <button class="sample-btn" onclick="askSample('How do you prevent overfitting?')">How to prevent overfitting?</button>
+      <button class="sample-btn" onclick="askSample('What is deep learning?')">What is deep learning?</button>
+    </div>
+  </div>
+  <div class="chat-area">
+    <div class="messages" id="messages">
+      <div class="welcome" id="welcome">
+        <div class="welcome-icon">🔍</div>
+        <h2>Ask your documents</h2>
+        <p>Ask any question about your uploaded PDF documents. Powered by RAG — Retrieval Augmented Generation.</p>
+      </div>
+    </div>
+    <div class="input-area">
+      <div class="input-wrapper">
+        <textarea id="questionInput" placeholder="Ask a question about your documents..." rows="1" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+        <button class="send-btn" id="sendBtn" onclick="sendQuestion()">
+          <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+      <div class="input-hint">Press Enter to send · Shift+Enter for new line</div>
+    </div>
+  </div>
+</div>
+<script>
+  let questionCount = 0;
+  const API_URL = 'http://127.0.0.1:8000';
+  function autoResize(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; }
+  function handleKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendQuestion(); } }
+  function askSample(q) { document.getElementById('questionInput').value = q; sendQuestion(); }
+  function hideWelcome() { const w = document.getElementById('welcome'); if (w) w.remove(); }
+  function addMessage(role, content, sources = []) {
+    hideWelcome();
+    const messages = document.getElementById('messages');
+    const msg = document.createElement('div');
+    msg.className = `message ${role}`;
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    avatar.textContent = role === 'user' ? '👤' : '🤖';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.innerHTML = content.replace(/\n/g, '<br>');
+    if (sources.length > 0) {
+      const s = document.createElement('div');
+      s.className = 'sources';
+      s.innerHTML = '<div class="sources-label">Sources</div>';
+      sources.forEach((src, i) => { s.innerHTML += `<span class="source-chip">📄 Page ${src.page !== 'unknown' ? src.page : i+1}</span>`; });
+      bubble.appendChild(s);
+    }
+    msg.appendChild(avatar);
+    msg.appendChild(bubble);
+    messages.appendChild(msg);
+    messages.scrollTop = messages.scrollHeight;
+  }
+  function addTyping() {
+    hideWelcome();
+    const messages = document.getElementById('messages');
+    const msg = document.createElement('div');
+    msg.className = 'message bot'; msg.id = 'typing';
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar'; avatar.textContent = '🤖';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
+    msg.appendChild(avatar); msg.appendChild(bubble);
+    messages.appendChild(msg);
+    messages.scrollTop = messages.scrollHeight;
+  }
+  function removeTyping() { const t = document.getElementById('typing'); if (t) t.remove(); }
+  async function sendQuestion() {
+    const input = document.getElementById('questionInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const question = input.value.trim();
+    if (!question) return;
+    input.value = ''; input.style.height = 'auto'; sendBtn.disabled = true;
+    addMessage('user', question);
+    addTyping();
+    try {
+      const response = await fetch(`${API_URL}/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question })
+      });
+      removeTyping();
+      if (!response.ok) {
+        const err = await response.json();
+        const detail = err.detail || 'Something went wrong';
+        if (detail.includes('RESOURCE_EXHAUSTED')) {
+          addMessage('bot', '⚠️ Gemini rate limit reached. Please wait a minute and try again.', []);
+        } else {
+          addMessage('bot', `<div class="error-bubble">Error: ${detail}</div>`, []);
+        }
+        return;
+      }
+      const data = await response.json();
+      addMessage('bot', data.answer, data.sources || []);
+      questionCount++;
+      document.getElementById('questionCount').textContent = questionCount;
+    } catch(err) {
+      removeTyping();
+      addMessage('bot', '<div class="error-bubble">Could not connect to API. Make sure server is running on port 8000.</div>', []);
+    } finally {
+      sendBtn.disabled = false; input.focus();
+    }
+  }
+</script>
+</body>
+</html>

@@ -1,4 +1,6 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import shutil
 import os
@@ -14,34 +16,16 @@ app = FastAPI(
     version="1.0.0",
 )
 
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 
 class QuestionRequest(BaseModel):
     question: str
 
 
-class SourceItem(BaseModel):
-    content: str
-    page: object
-    source: str
-
-
-class QuestionResponse(BaseModel):
-    question: str
-    answer: str
-    sources: list
-
-
 @app.get("/")
 def root():
-    return {
-        "message": "RAG Document Q&A API",
-        "docs": "/docs",
-        "endpoints": {
-            "ask": "POST /ask",
-            "ingest": "POST /ingest",
-            "health": "GET /health",
-        }
-    }
+    return FileResponse("static/index.html")
 
 
 @app.get("/health")
