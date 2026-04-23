@@ -1,5 +1,8 @@
 # 📚 RAG Document Q&A System
 
+🌐 **Live Demo:** https://rag-document-qa-1-0a75.onrender.com
+
+
 A production-ready **Retrieval-Augmented Generation (RAG)** pipeline that enables natural language Q&A over PDF documents. Built with LangChain, ChromaDB, Google Gemini API, and FastAPI.
 
 ---
