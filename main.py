@@ -44,19 +44,30 @@ def ask(request: QuestionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
 @app.post("/ingest")
 def ingest_document(file: UploadFile = File(...)):
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
-    upload_path = os.path.join(settings.upload_dir, file.filename)
-    with open(upload_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF files are supported"
+        )
+
     try:
+        os.makedirs(settings.upload_dir, exist_ok=True)
+
+        upload_path = os.path.join(settings.upload_dir, file.filename)
+
+        with open(upload_path, "wb") as buffer:
+            buffer.write(file.file.read())
+
         chunks = ingest_pdfs_from_folder()
         store_embeddings(chunks)
+
         return {
             "message": f"Successfully ingested {file.filename}",
             "chunks": len(chunks),
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
