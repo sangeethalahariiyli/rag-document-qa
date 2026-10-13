@@ -1,14 +1,16 @@
+
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-import shutil
+from pathlib import Path
 import os
 
 from app.core.config import settings
 from app.utils.qa_chain import ask_question
 from app.utils.ingestor import ingest_pdfs_from_folder
-from app.utils.embedder import store_embeddings
+from app.utils.embedder import store_embeddings, load_vectorstore
+
 
 app = FastAPI(
     title="RAG Document Q&A",
@@ -21,6 +23,37 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 class QuestionRequest(BaseModel):
     question: str
+
+
+@app.on_event("startup")
+def restore_knowledge_base():
+    """Rebuild the sample knowledge base if ChromaDB is empty."""
+    try:
+        vectorstore = load_vectorstore()
+        document_count = vectorstore._collection.count()
+
+        if document_count > 0:
+            print(
+                f"Knowledge base already contains "
+                f"{document_count} chunks."
+            )
+            return
+
+        sample_dir = Path(__file__).resolve().parent / "sample_docs"
+
+        if not sample_dir.exists() or not list(sample_dir.glob("*.pdf")):
+            print("No sample PDF found. Upload a PDF using /ingest.")
+            return
+
+        print("Empty knowledge base detected. Rebuilding from sample PDF...")
+
+        chunks = ingest_pdfs_from_folder(str(sample_dir))
+        store_embeddings(chunks)
+
+        print(f"Knowledge base restored with {len(chunks)} chunks.")
+
+    except Exception as e:
+        print(f"Knowledge-base recovery failed: {e}")
 
 
 @app.get("/")
@@ -36,13 +69,15 @@ def health_check():
 @app.post("/ask")
 def ask(request: QuestionRequest):
     if not request.question.strip():
-        raise HTTPException(status_code=400, detail="Question cannot be empty")
+        raise HTTPException(
+            status_code=400,
+            detail="Question cannot be empty"
+        )
+
     try:
-        result = ask_question(request.question)
-        return result
+        return ask_question(request.question)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 
 @app.post("/ingest")
@@ -71,3 +106,4 @@ def ingest_document(file: UploadFile = File(...)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
