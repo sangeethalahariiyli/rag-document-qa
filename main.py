@@ -1,10 +1,12 @@
 
+from threading import Thread
+from pathlib import Path
+import os
+
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from pathlib import Path
-import os
 
 from app.core.config import settings
 from app.utils.qa_chain import ask_question
@@ -21,12 +23,7 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
-class QuestionRequest(BaseModel):
-    question: str
-
-
-@app.on_event("startup")
-def restore_knowledge_base():
+def rebuild_knowledge_base():
     """Rebuild the sample knowledge base if ChromaDB is empty."""
     try:
         vectorstore = load_vectorstore()
@@ -41,19 +38,43 @@ def restore_knowledge_base():
 
         sample_dir = Path(__file__).resolve().parent / "sample_docs"
 
-        if not sample_dir.exists() or not list(sample_dir.glob("*.pdf")):
-            print("No sample PDF found. Upload a PDF using /ingest.")
+        if not sample_dir.exists():
+            print("Sample documents folder not found.")
             return
 
-        print("Empty knowledge base detected. Rebuilding from sample PDF...")
+        if not list(sample_dir.glob("*.pdf")):
+            print("No sample PDF found in sample_docs.")
+            return
+
+        print("Empty knowledge base detected. Rebuilding...")
 
         chunks = ingest_pdfs_from_folder(str(sample_dir))
+
+        if not chunks:
+            print("No document chunks were generated.")
+            return
+
         store_embeddings(chunks)
 
-        print(f"Knowledge base restored with {len(chunks)} chunks.")
+        print(
+            f"Knowledge base restored with {len(chunks)} chunks."
+        )
 
     except Exception as e:
         print(f"Knowledge-base recovery failed: {e}")
+
+
+@app.on_event("startup")
+def start_knowledge_base_recovery():
+    """Start recovery without blocking server startup."""
+    Thread(
+        target=rebuild_knowledge_base,
+        daemon=True
+    ).start()
+
+
+class QuestionRequest(BaseModel):
+    question: str
 
 
 @app.get("/")
@@ -63,7 +84,10 @@ def root():
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "message": "RAG Q&A API is running"}
+    return {
+        "status": "ok",
+        "message": "RAG Q&A API is running"
+    }
 
 
 @app.post("/ask")
@@ -76,8 +100,12 @@ def ask(request: QuestionRequest):
 
     try:
         return ask_question(request.question)
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 
 @app.post("/ingest")
@@ -91,19 +119,41 @@ def ingest_document(file: UploadFile = File(...)):
     try:
         os.makedirs(settings.upload_dir, exist_ok=True)
 
-        upload_path = os.path.join(settings.upload_dir, file.filename)
+        filename = Path(file.filename).name
+        upload_path = os.path.join(
+            settings.upload_dir,
+            filename
+        )
 
         with open(upload_path, "wb") as buffer:
             buffer.write(file.file.read())
 
         chunks = ingest_pdfs_from_folder()
+
+        if not chunks:
+            raise HTTPException(
+                status_code=400,
+                detail="No document chunks were generated."
+            )
+
         store_embeddings(chunks)
 
         return {
-            "message": f"Successfully ingested {file.filename}",
-            "chunks": len(chunks),
+            "message": f"Successfully ingested {filename}",
+            "chunks": len(chunks)
         }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
 
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+    finally:
+        file.file.close()
+
+
+    
